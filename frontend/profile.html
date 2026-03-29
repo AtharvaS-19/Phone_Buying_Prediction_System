@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BuyWise — My Profile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-noise"></div>
+
+  <nav class="navbar">
+    <a href="index.html" class="nav-logo">BuyWise</a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Browse Phones</a>
+      <a href="alerts.html" class="nav-link">My Alerts</a>
+      <button class="btn-nav-logout" id="logoutBtn">Logout</button>
+    </div>
+  </nav>
+
+  <div class="page-header">
+    <div class="page-eyebrow">Account</div>
+    <h1 class="page-title" id="pageGreeting">My Profile</h1>
+    <p class="page-sub" id="pageEmail">—</p>
+  </div>
+
+  <div class="profile-layout">
+
+    <div class="profile-stat-row">
+      <div class="profile-stat-card">
+        <div class="psc-num" id="alertCount">—</div>
+        <div class="psc-label">Active Alerts</div>
+      </div>
+      <div class="profile-stat-card">
+        <div class="psc-num" id="savedCount">—</div>
+        <div class="psc-label">Phones Tracked</div>
+      </div>
+      <div class="profile-stat-card">
+        <div class="psc-num" id="memberSince">—</div>
+        <div class="psc-label">Member Since</div>
+      </div>
+    </div>
+
+    <div class="profile-card">
+      <div class="profile-card-header">
+        <h2 class="profile-section-title">Account Info</h2>
+      </div>
+      <div class="info-view-grid">
+        <div class="info-view-item">
+          <span class="info-view-label">Name</span>
+          <span class="info-view-value" id="infoName">—</span>
+        </div>
+        <div class="info-view-item">
+          <span class="info-view-label">Email</span>
+          <span class="info-view-value" id="infoEmail">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="profile-card">
+      <h2 class="profile-section-title">My Price Alerts</h2>
+      <div id="profileAlerts" class="alerts-list-compact">
+        <div class="empty-state">Loading…</div>
+      </div>
+      <a href="alerts.html" class="profile-alerts-link">Manage all alerts →</a>
+    </div>
+
+    <a href="index.html" class="btn-primary profile-book-btn" style="text-decoration:none;text-align:center;">Browse &amp; Track More Phones →</a>
+
+  </div>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="nav-logo" style="font-size:18px;">BuyWise</div>
+      <p class="footer-sub">Price data updated daily.</p>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { supabase } from './supabase.js'
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { location.href = 'auth.html' }
+
+    const user = session.user
+    const name = user.user_metadata?.full_name || user.email.split('@')[0]
+
+    document.getElementById('pageGreeting').textContent = 'Hey, ' + name.split(' ')[0] + ' 👋'
+    document.getElementById('pageEmail').textContent = user.email
+    document.getElementById('infoName').textContent = name
+    document.getElementById('infoEmail').textContent = user.email
+    document.getElementById('memberSince').textContent = new Date(user.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+
+    document.getElementById('logoutBtn').onclick = async () => {
+      await supabase.auth.signOut(); location.href = 'index.html'
+    }
+
+    const { data: alerts } = await supabase
+      .from('alerts')
+      .select('*, phones(name, brand, amazon_price, flipkart_price, image_url, verdict)')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+
+    document.getElementById('alertCount').textContent = alerts?.length || 0
+    document.getElementById('savedCount').textContent = alerts?.length || 0
+
+    const profileAlerts = document.getElementById('profileAlerts')
+    if (!alerts?.length) {
+      profileAlerts.innerHTML = '<div class="empty-state">No alerts yet. <a href="index.html" style="color:var(--accent);">Browse phones →</a></div>'
+    } else {
+      profileAlerts.innerHTML = alerts.slice(0, 5).map(a => {
+        const phone = a.phones
+        const best = Math.min(phone.amazon_price, phone.flipkart_price)
+        const reached = best <= a.target_price
+        return `
+          <div class="alert-compact-item">
+            <img src="${phone.image_url}" class="alert-compact-img" onerror="this.src='https://via.placeholder.com/40x40/1a1a2e/666?text=📱'">
+            <div class="alert-compact-info">
+              <div class="alert-compact-name">${phone.name}</div>
+              <div class="alert-compact-price">
+                Target ₹${a.target_price.toLocaleString('en-IN')} · Now ₹${best.toLocaleString('en-IN')}
+                ${reached ? '<span class="green" style="font-weight:700;"> ✓ Reached!</span>' : ''}
+              </div>
+            </div>
+          </div>
+        `
+      }).join('')
+    }
+  </script>
+</body>
+</html>

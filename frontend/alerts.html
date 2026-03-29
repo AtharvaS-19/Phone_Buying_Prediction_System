@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BuyWise — My Alerts</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-noise"></div>
+
+  <nav class="navbar">
+    <a href="index.html" class="nav-logo">BuyWise</a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Browse Phones</a>
+      <button class="btn-nav-logout" id="logoutBtn">Logout</button>
+    </div>
+  </nav>
+
+  <div class="page-header">
+    <div class="page-eyebrow">Alerts</div>
+    <h1 class="page-title">My Price Alerts</h1>
+    <p class="page-sub">We'll notify you when a phone hits your target price.</p>
+  </div>
+
+  <div class="alerts-layout">
+    <div id="alertsList" class="alerts-list">
+      <div class="loading-state">Loading your alerts…</div>
+    </div>
+    <div class="alerts-tip">
+      <span class="tip-icon">💡</span>
+      <span>Browse a phone and tap <strong>Notify Me</strong> to set a new alert.</span>
+      <a href="index.html" class="tip-link">Browse phones →</a>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="nav-logo" style="font-size:18px;">BuyWise</div>
+      <p class="footer-sub">Price data updated daily.</p>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { supabase } from './supabase.js'
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { location.href = 'auth.html' }
+
+    document.getElementById('logoutBtn').onclick = async () => {
+      await supabase.auth.signOut(); location.href = 'index.html'
+    }
+
+    async function loadAlerts() {
+      const { data, error } = await supabase
+        .from('alerts')
+        .select('*, phones(name, brand, image_url, amazon_price, flipkart_price, verdict)')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+
+      const list = document.getElementById('alertsList')
+
+      if (error || !data?.length) {
+        list.innerHTML = `
+          <div class="empty-alerts">
+            <div class="empty-alerts-icon">🔔</div>
+            <div class="empty-alerts-title">No alerts yet</div>
+            <p class="empty-alerts-sub">Browse a phone and set a target price to get notified when it drops.</p>
+            <a href="index.html" class="btn-primary" style="display:inline-block;width:auto;padding:12px 28px;text-decoration:none;">Browse Phones</a>
+          </div>
+        `
+        return
+      }
+
+      list.innerHTML = data.map(a => {
+        const phone = a.phones
+        const best = Math.min(phone.amazon_price, phone.flipkart_price)
+        const reached = best <= a.target_price
+        const gap = best - a.target_price
+        const verdictCfg = { buy: 'verdict-buy', wait: 'verdict-wait', watch: 'verdict-watch' }[phone.verdict] || 'verdict-watch'
+
+        return `
+          <div class="alert-item ${reached ? 'alert-reached' : ''}">
+            <img src="${phone.image_url}" alt="${phone.name}" class="alert-item-img" onerror="this.src='https://via.placeholder.com/60x60/1a1a2e/666?text=📱'">
+            <div class="alert-item-info">
+              <div class="alert-item-brand">${phone.brand}</div>
+              <a href="phone.html?id=${a.phone_id}" class="alert-item-name">${phone.name}</a>
+              <div class="alert-item-prices">
+                Current: <strong>₹${best.toLocaleString('en-IN')}</strong>
+                · Target: <strong class="${reached ? 'green' : ''}">₹${a.target_price.toLocaleString('en-IN')}</strong>
+                ${reached
+                  ? '<span class="alert-reached-tag">🎉 Target Reached!</span>'
+                  : `<span class="alert-gap">₹${gap.toLocaleString('en-IN')} to go</span>`
+                }
+              </div>
+              <div class="alert-item-date">Set on ${new Date(a.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}</div>
+            </div>
+            <div class="alert-item-right">
+              <span class="phone-card-verdict ${verdictCfg}" style="position:static;font-size:11px;">${phone.verdict}</span>
+              <button class="alert-delete-btn" onclick="deleteAlert('${a.id}')">Remove</button>
+            </div>
+          </div>
+        `
+      }).join('')
+    }
+
+    window.deleteAlert = async (id) => {
+      await supabase.from('alerts').delete().eq('id', id)
+      loadAlerts()
+    }
+
+    loadAlerts()
+  </script>
+</body>
+</html>

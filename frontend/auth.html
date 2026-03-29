@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BuyWise — Sign In</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-noise"></div>
+
+  <nav class="navbar">
+    <a href="index.html" class="nav-logo">BuyWise</a>
+  </nav>
+
+  <div class="auth-page">
+    <div class="auth-box">
+      <div class="auth-logo">BuyWise</div>
+      <h1 class="auth-title">Never overpay again</h1>
+      <p class="auth-sub">Sign in to set price alerts and track your phones.</p>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabLogin" onclick="switchTab('login')">Login</button>
+        <button class="auth-tab" id="tabSignup" onclick="switchTab('signup')">Sign Up</button>
+      </div>
+
+      <div id="loginForm">
+        <div class="field-group">
+          <label class="field-label">Email</label>
+          <input type="email" id="loginEmail" class="field-input" placeholder="you@example.com">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Password</label>
+          <input type="password" id="loginPassword" class="field-input" placeholder="••••••••">
+        </div>
+        <button class="btn-primary full-width" id="loginBtn">Login</button>
+      </div>
+
+      <div id="signupForm" style="display:none;">
+        <div class="field-group">
+          <label class="field-label">Full Name</label>
+          <input type="text" id="signupName" class="field-input" placeholder="Rahul Sharma">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Email</label>
+          <input type="email" id="signupEmail" class="field-input" placeholder="you@example.com">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Password</label>
+          <input type="password" id="signupPassword" class="field-input" placeholder="Min. 6 characters">
+        </div>
+        <button class="btn-primary full-width" id="signupBtn">Create Account</button>
+      </div>
+
+      <p id="authMsg" class="status-msg" style="text-align:center;margin-top:1rem;"></p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase } from './supabase.js'
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) location.href = 'profile.html'
+
+    window.switchTab = (tab) => {
+      document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none'
+      document.getElementById('signupForm').style.display = tab === 'signup' ? 'block' : 'none'
+      document.getElementById('tabLogin').classList.toggle('active', tab === 'login')
+      document.getElementById('tabSignup').classList.toggle('active', tab === 'signup')
+      document.getElementById('authMsg').textContent = ''
+    }
+
+    function showMsg(text, ok) {
+      const el = document.getElementById('authMsg')
+      el.textContent = text
+      el.style.color = ok ? '#34d399' : '#f87171'
+    }
+
+    document.getElementById('loginBtn').onclick = async () => {
+      const email = document.getElementById('loginEmail').value.trim()
+      const password = document.getElementById('loginPassword').value
+      if (!email || !password) { showMsg('Please fill in all fields.', false); return }
+      const btn = document.getElementById('loginBtn')
+      btn.textContent = 'Logging in…'; btn.disabled = true
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) { showMsg(error.message, false); btn.textContent = 'Login'; btn.disabled = false }
+      else { showMsg('Welcome back!', true); setTimeout(() => location.href = 'profile.html', 700) }
+    }
+
+    document.getElementById('signupBtn').onclick = async () => {
+      const name = document.getElementById('signupName').value.trim()
+      const email = document.getElementById('signupEmail').value.trim()
+      const password = document.getElementById('signupPassword').value
+      if (!name || !email || !password) { showMsg('Please fill in all fields.', false); return }
+      if (password.length < 6) { showMsg('Password must be at least 6 characters.', false); return }
+      const btn = document.getElementById('signupBtn')
+      btn.textContent = 'Creating…'; btn.disabled = true
+      const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name } } })
+      if (error) { showMsg(error.message, false); btn.textContent = 'Create Account'; btn.disabled = false }
+      else { showMsg('Account created! Check your email, then login.', true); btn.textContent = 'Create Account'; btn.disabled = false; switchTab('login') }
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return
+      if (document.getElementById('tabLogin').classList.contains('active')) document.getElementById('loginBtn').click()
+      else document.getElementById('signupBtn').click()
+    })
+  </script>
+</body>
+</html>
