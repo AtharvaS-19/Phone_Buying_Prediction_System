@@ -164,6 +164,7 @@ def predict(data: PriceData):
         "verdict": verdict
     })
 
+    print("Score:", score, "Trend:", trend, "Proximity:", proximity_signal)
     return {
         "verdict": verdict,
         "predicted_price": int(round(float(predicted_price), 0)),
@@ -191,9 +192,9 @@ def _fallback(current_price, lowest_ever):
 
 def _confidence(score: int) -> str:
     abs_score = abs(score)
-    if abs_score >= 5:
+    if abs_score >= 3:
         return "high"
-    elif abs_score >= 3:
+    elif abs_score >= 1:
         return "medium"
     return "low"
 

@@ -201,7 +201,7 @@
       const daysToNextSale = futureSales.length > 0 ? Math.min(...futureSales) : null
 
       try {
-        const res = await fetch("https://phone-buying-prediction-system.onrender.com/predict", {
+        const res = await fetch("https://phone-buying-prediction-system.onrender.com/", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
