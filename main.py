@@ -110,20 +110,16 @@ def predict(data: PriceData):
 
     # Trend contribution (max ±3)
     if trend == "falling":
-        score -= 2   # price dropping → wait
+        score -= 3   # price dropping → wait
     elif trend == "rising":
-        score += 2   # price rising → buy now before it goes up
+        score += 3   # price rising → buy now before it goes up
     # flat = 0
 
     # Proximity contribution (max ±4) — most important signal
     if proximity_signal == "near_low":
-        score += 4
-    elif proximity_signal == "good":
-        score += 2
-    elif proximity_signal == "mid":
-        score += 0
+        score += 5
     elif proximity_signal == "near_high":
-        score -= 3
+        score -= 4
 
     # Volatility contribution
     if high_volatility and trend == "falling":
@@ -165,9 +161,11 @@ def predict(data: PriceData):
     })
 
     print("Score:", score, "Trend:", trend, "Proximity:", proximity_signal)
+
     return {
         "verdict": verdict,
         "predicted_price": int(round(float(predicted_price), 0)),
+        "price_difference": round(predicted_price - data.current_price, 0),
         "confidence": _confidence(score),
         "signals": {
             "trend": trend,
@@ -199,34 +197,36 @@ def _confidence(score: int) -> str:
     return "low"
 
 
-def _build_reason(verdict, trend, proximity, sale_incoming, volatile, predicted, current) -> str:
-    parts = []
+def _build_reason(verdict, trend, proximity_signal, sale_incoming, high_volatility, predicted_price, current_price):
+    reasons = []
 
-    if proximity == "near_low":
-        parts.append("price is near its all-time low")
-    elif proximity == "near_high":
-        parts.append("price is near its historical high")
-
+    # Trend
     if trend == "falling":
-        parts.append("trend is downward")
+        reasons.append("Price is trending downward recently")
     elif trend == "rising":
-        parts.append("trend is rising")
+        reasons.append("Price has been increasing recently")
+    else:
+        reasons.append("Price is relatively stable")
 
+    # Proximity
+    if proximity_signal == "near_low":
+        reasons.append("Current price is close to its historical lowest")
+    elif proximity_signal == "near_high":
+        reasons.append("Current price is near its historical peak")
+
+    # Sale
     if sale_incoming:
-        parts.append("a sale event is coming within 3 weeks")
+        reasons.append("Upcoming sale could drop prices further")
 
-    diff = predicted - current
-    if abs(diff) > current * 0.02:
-        direction = "drop" if diff < 0 else "rise"
-        parts.append(f"price expected to {direction} to ₹{int(predicted):,} in ~7 days")
+    # Volatility
+    if high_volatility:
+        reasons.append("Price is fluctuating heavily")
 
-    if not parts:
-        parts.append("price is stable with no strong signals")
+    # Prediction
+    diff = predicted_price - current_price
+    if diff < -1000:
+        reasons.append("Model expects price drop soon")
+    elif diff > 1000:
+        reasons.append("Model expects price increase soon")
 
-    base = {
-        "buy":  "Good time to buy — ",
-        "wait": "Consider waiting — ",
-        "hold": "Hold for now — "
-    }[verdict]
-
-    return base + ", ".join(parts) + "."
+    return " · ".join(reasons)
