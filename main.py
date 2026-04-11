@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import numpy as np
-from datetime import date
 
 app = FastAPI()
 
-# middleware Allows the Frontend to call API
-app.add_middleware(  
+# Allow frontend to call API
+app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -17,216 +16,133 @@ app.add_middleware(
 )
 
 class PriceData(BaseModel):
-    # Separate platform prices so we don't mix them
-    amazon_prices: list[float]   # ordered oldest → newest, one per day
-    flipkart_prices: list[float] # ordered oldest → newest, one per day
+    amazon_prices: list[float]
+    flipkart_prices: list[float]
     current_price: float
     lowest_ever: float
     highest_ever: float
-    # Optional: days until next known sale (0 = sale is on, None = unknown)
     days_to_next_sale: Optional[int] = None
+
 
 @app.get("/")
 def home():
     return {"message": "BuyWise ML API running"}
 
+
 @app.post("/predict")
 def predict(data: PriceData):
 
-    # ── 1. BUILD A CLEAN COMBINED SERIES ──────────────────────
-    # Average Amazon + Flipkart per day where both exist,
-    # otherwise use whichever is available
+    # ---------- 1. CLEAN + COMBINE DATA ----------
     amz = np.array(data.amazon_prices, dtype=float)
-    fk  = np.array(data.flipkart_prices, dtype=float)
+    fk = np.array(data.flipkart_prices, dtype=float)
 
-    # Align lengths
     min_len = min(len(amz), len(fk))
-    if min_len == 0:
-        return _fallback(data.current_price, data.lowest_ever)
+    if min_len < 5:
+        return fallback(data)
 
     amz = amz[-min_len:]
-    fk  = fk[-min_len:]
-    combined = (amz + fk) / 2  # daily average of both platforms
+    fk = fk[-min_len:]
 
-    # ── 2. SMOOTH WITH 7-DAY MOVING AVERAGE ──────────────────
-    window = min(7, len(combined))
-    smoothed = np.convolve(combined, np.ones(window) / window, mode='valid')
+    combined = (amz + fk) / 2
 
-    if len(smoothed) < 5:
-        return _fallback(data.current_price, data.lowest_ever)
+    # ---------- 2. LINEAR REGRESSION ----------
+    x = np.arange(len(combined))
+    slope, intercept = np.polyfit(x, combined, 1)
 
-    # ── 3. LINEAR TREND (last 30 days only) ───────────────────
-    # Using all 90 days dilutes recent momentum; 30 days is more predictive
-    recent = smoothed[-30:] if len(smoothed) >= 30 else smoothed
-    x = np.arange(len(recent))
-    slope, intercept = np.polyfit(x, recent, 1)
+    # Predict next 7 days
+    future_x = len(combined) + 7
+    predicted_price = intercept + slope * future_x
 
-    # Predict 7 days out
-    predicted_price = intercept + slope * (len(recent) + 7)
-    predicted_price = max(predicted_price, data.lowest_ever * 0.9)  # sanity floor
+    # Safety clamp
+    predicted_price = max(predicted_price, data.lowest_ever * 0.9)
 
-    # ── 4. SIGNAL 1: TREND DIRECTION ──────────────────────────
-    price_range = data.highest_ever - data.lowest_ever
-    # Slope is significant only if it moves >0.5% of range per day
-    significance_threshold = price_range * 0.005
-    if abs(slope) < significance_threshold:
-        trend = "flat"
-    elif slope < 0:
+    # ---------- 3. TREND ----------
+    if slope < -5:
         trend = "falling"
-    else:
+    elif slope > 5:
         trend = "rising"
-
-    # ── 5. SIGNAL 2: PROXIMITY TO LOWEST EVER ─────────────────
-    # How far is current price from all-time low, as % of price range
-    if price_range > 0:
-        proximity_pct = (data.current_price - data.lowest_ever) / price_range
     else:
-        proximity_pct = 0.5
+        trend = "flat"
 
-    # 0.0 = at lowest ever, 1.0 = at highest ever
-    if proximity_pct <= 0.15:
-        proximity_signal = "near_low"      # within bottom 15% of range → strong buy
-    elif proximity_pct <= 0.35:
-        proximity_signal = "good"          # reasonable price
-    elif proximity_pct <= 0.65:
-        proximity_signal = "mid"           # middle of range → neutral
+    # ---------- 4. POSITION IN PRICE RANGE ----------
+    price_range = data.highest_ever - data.lowest_ever
+    if price_range <= 0:
+        proximity = 0.5
     else:
-        proximity_signal = "near_high"     # in top 35% → overpriced
+        proximity = (data.current_price - data.lowest_ever) / price_range
 
-    # ── 6. SIGNAL 3: RECENT VOLATILITY ────────────────────────
-    # High volatility = price is unstable, might drop further
-    recent_prices = combined[-14:] if len(combined) >= 14 else combined
-    volatility = np.std(recent_prices) / np.mean(recent_prices) if np.mean(recent_prices) > 0 else 0
-    high_volatility = volatility > 0.03  # >3% std dev relative to mean
-
-    # ── 7. SIGNAL 4: SALE SEASON ──────────────────────────────
-    sale_incoming = False
-    if data.days_to_next_sale is not None and 0 < data.days_to_next_sale <= 21:
-        sale_incoming = True  # sale within 3 weeks → wait
-
-    # ── 8. SCORING SYSTEM ─────────────────────────────────────
-    # Score: positive = buy, negative = wait, near zero = hold
+    # ---------- 5. SCORING ----------
     score = 0
 
-    # Trend contribution (max ±3)
+    # Trend impact
     if trend == "falling":
-        score -= 3   # price dropping → wait
+        score -= 2
     elif trend == "rising":
-        score += 3   # price rising → buy now before it goes up
-    # flat = 0
+        score += 2
 
-    # Proximity contribution (max ±4) — most important signal
-    if proximity_signal == "near_low":
-        score += 5
-    elif proximity_signal == "near_high":
-        score -= 4
+    # Position impact
+    if proximity <= 0.2:
+        score += 3   # cheap → buy
+    elif proximity >= 0.7:
+        score -= 3   # expensive → hold
 
-    # Volatility contribution
-    if high_volatility and trend == "falling":
-        score -= 1   # unstable + falling = wait more
+    # Prediction impact
+    diff_pct = (predicted_price - data.current_price) / data.current_price
 
-    # Sale contribution
-    if sale_incoming:
-        score -= 2   # sale coming → always worth waiting
+    if diff_pct > 0.03:
+        score += 2   # price going up → buy now
+    elif diff_pct < -0.03:
+        score -= 2   # price dropping → wait (hold)
 
-    # Predicted price vs current
-    predicted_diff_pct = (predicted_price - data.current_price) / data.current_price
-    if predicted_diff_pct < -0.02:   # predicted >2% below current
-        score -= 1
-    elif predicted_diff_pct > 0.02:  # predicted >2% above current
-        score += 1
-
-    # ── 9. VERDICT ────────────────────────────────────────────
-    if score >= 4:
+    # ---------- 6. FINAL VERDICT ----------
+    if score >= 2:
         verdict = "buy"
-    elif score <= -2:
-        verdict = "wait"
     else:
         verdict = "hold"
 
-    # Build human-readable reason
-    reason = _build_reason(verdict, trend, proximity_signal, sale_incoming, high_volatility, predicted_price, data.current_price)
+    # ---------- 7. CONFIDENCE ----------
+    if abs(score) >= 4:
+        confidence = "high"
+    elif abs(score) >= 2:
+        confidence = "medium"
+    else:
+        confidence = "low"
 
-    print({
-        "phone_current": float(data.current_price),
-        "predicted_7d": int(round(float(predicted_price), 0)),
-        "slope": round(float(slope), 2),
-        "trend": trend,
-        "proximity": proximity_signal,
-        "proximity_pct": round(float(proximity_pct), 2),
-        "volatility": round(float(volatility), 4),
-        "sale_incoming": bool(sale_incoming),
-        "score": int(score),
-        "verdict": verdict
-    })
+    # ---------- 8. REASONING ----------
+    reasons = []
 
-    print("Score:", score, "Trend:", trend, "Proximity:", proximity_signal)
+    if trend == "rising":
+        reasons.append("Price has been increasing recently")
+    elif trend == "falling":
+        reasons.append("Price is dropping recently")
+    else:
+        reasons.append("Price is relatively stable")
+
+    if proximity <= 0.2:
+        reasons.append("Price is near historical low")
+    elif proximity >= 0.7:
+        reasons.append("Price is closer to historical high")
+
+    if diff_pct > 0.03:
+        reasons.append("Expected to rise further soon")
+    elif diff_pct < -0.03:
+        reasons.append("Expected to drop further soon")
+
+    reason = " · ".join(reasons)
 
     return {
         "verdict": verdict,
-        "predicted_price": int(round(float(predicted_price), 0)),
-        "price_difference": round(predicted_price - data.current_price, 0),
-        "confidence": _confidence(score),
-        "signals": {
-            "trend": trend,
-            "proximity_to_low": proximity_signal,
-            "high_volatility": bool(high_volatility),
-            "sale_incoming": bool(sale_incoming),
-            "score": int(score)
-        },
+        "predicted_price": round(float(predicted_price), 0),
+        "confidence": confidence,
         "reason": reason
     }
 
 
-def _fallback(current_price, lowest_ever):
+# ---------- FALLBACK ----------
+def fallback(data):
     return {
         "verdict": "hold",
-        "predicted_price": int(round(current_price, 0)),
+        "predicted_price": data.current_price,
         "confidence": "low",
-        "signals": {},
-        "reason": "Not enough price history to make a confident prediction."
+        "reason": "Not enough data to make a prediction"
     }
-
-
-def _confidence(score: int) -> str:
-    abs_score = abs(score)
-    if abs_score >= 3:
-        return "high"
-    elif abs_score >= 1:
-        return "medium"
-    return "low"
-
-
-def _build_reason(verdict, trend, proximity_signal, sale_incoming, high_volatility, predicted_price, current_price):
-    reasons = []
-
-    # Trend
-    if trend == "falling":
-        reasons.append("Price is trending downward recently")
-    elif trend == "rising":
-        reasons.append("Price has been increasing recently")
-    else:
-        reasons.append("Price is relatively stable")
-
-    # Proximity
-    if proximity_signal == "near_low":
-        reasons.append("Current price is close to its historical lowest")
-    elif proximity_signal == "near_high":
-        reasons.append("Current price is near its historical peak")
-
-    # Sale
-    if sale_incoming:
-        reasons.append("Upcoming sale could drop prices further")
-
-    # Volatility
-    if high_volatility:
-        reasons.append("Price is fluctuating heavily")
-
-    # Prediction
-    diff = predicted_price - current_price
-    if diff < -1000:
-        reasons.append("Model expects price drop soon")
-    elif diff > 1000:
-        reasons.append("Model expects price increase soon")
-
-    return " · ".join(reasons)
