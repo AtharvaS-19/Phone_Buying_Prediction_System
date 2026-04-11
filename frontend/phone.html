@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BuyWise — Phone Detail</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800&family=Instrument+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
+
 <body>
 
   <div class="bg-noise"></div>
@@ -147,15 +151,41 @@
       const currentPrice = Math.min(phone.amazon_price, phone.flipkart_price)
 
       // Split by platform, sorted oldest → newest
-      const amzPrices = history
-        .filter(h => h.platform === 'amazon')
-        .sort((a, b) => a.recorded_at.localeCompare(b.recorded_at))
-        .map(h => h.price)
+      function buildAlignedSeries(history) {
+        const map = {}
 
-      const fkPrices = history
-        .filter(h => h.platform === 'flipkart')
-        .sort((a, b) => a.recorded_at.localeCompare(b.recorded_at))
-        .map(h => h.price)
+        // Group by date
+        history.forEach(h => {
+          const date = h.recorded_at.slice(0, 10)
+
+          if (!map[date]) {
+            map[date] = { amazon: null, flipkart: null }
+          }
+
+          map[date][h.platform] = h.price
+        })
+
+        // Convert to sorted array
+        const dates = Object.keys(map).sort()
+
+        const amazon = []
+        const flipkart = []
+
+        dates.forEach(date => {
+          const entry = map[date]
+
+          // Only push if at least one exists
+          if (entry.amazon || entry.flipkart) {
+            amazon.push(entry.amazon ?? entry.flipkart)
+            flipkart.push(entry.flipkart ?? entry.amazon)
+          }
+        })
+
+        return { amazon, flipkart }
+      }
+      const { amazon: amzPrices, flipkart: fkPrices } = buildAlignedSeries(history)
+      console.log("Amazon:", amzPrices)
+console.log("Flipkart:", fkPrices)
 
       // Sale calendar — days until next known Indian sale event
       const today = new Date()
@@ -209,10 +239,10 @@
     const { data: history } = await supabase
       .from('price_history').select('*').eq('phone_id', phoneId)
       .order('recorded_at', { ascending: true })
-      
+
     document.getElementById('loadingState').style.display = 'none'
     document.getElementById('phoneDetail').style.display = 'block'
-      
+
     // Fill header
     document.title = `BuyWise — ${phone.name}`
     document.getElementById('bcName').textContent = phone.name
@@ -232,7 +262,7 @@
     const mlData = await getMLVerdict(history, phone)
     const saving = phone.highest_ever - best
     document.getElementById('savingVsPeak').textContent = '₹' + saving.toLocaleString('en-IN')
-    
+
     // Prices
     document.getElementById('amazonPrice').textContent = '₹' + phone.amazon_price.toLocaleString('en-IN')
     document.getElementById('flipkartPrice').textContent = '₹' + phone.flipkart_price.toLocaleString('en-IN')
@@ -243,8 +273,8 @@
 
     // Verdict — map 'hold' → watch UI
     const verdictMap = {
-      buy:  { label: 'Buy Now',       cls: 'vb-buy',   icon: '✓ Buy Now' },
-      wait: { label: 'Wait for Now',  cls: 'vb-wait',  icon: '⏳ Wait' },
+      buy: { label: 'Buy Now', cls: 'vb-buy', icon: '✓ Buy Now' },
+      wait: { label: 'Wait for Now', cls: 'vb-wait', icon: '⏳ Wait' },
       hold: { label: 'Keep Watching', cls: 'vb-watch', icon: '👁 Watch' }
     }
     const verdictCfg = verdictMap[mlData.verdict] || verdictMap.hold
@@ -385,7 +415,7 @@
       { name: 'Republic Day Sale', month: 'Jan 2025', drop: '6%', status: 'upcoming' },
     ]
     document.getElementById('saleTimeline').innerHTML = sales.map(s => `
-      <div class="sale-event ${s.status}">
+      <div class="sale-event ${s.status}">a
         <div class="sale-dot"></div>
         <div class="sale-info">
           <div class="sale-name">${s.name}</div>
@@ -413,4 +443,5 @@
     }
   </script>
 </body>
+
 </html>
