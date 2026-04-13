@@ -130,9 +130,12 @@ def predict(data: PriceData):
 
     reason = " · ".join(reasons)
 
+    price_diff = predicted_price - data.current_price
+
     return {
         "verdict": verdict,
         "predicted_price": round(float(predicted_price), 0),
+        "price_difference": round(float(price_diff), 0),
         "confidence": confidence,
         "reason": reason
     }
