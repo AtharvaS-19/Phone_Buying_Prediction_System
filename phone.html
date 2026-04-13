@@ -142,8 +142,16 @@
     import { supabase } from './supabase.js'
 
     function getImageUrl(path) {
-      if (!path) return "https://via.placeholder.com/300x300?text=📱"
+      if (!path) {
+        return "https://via.placeholder.com/200x200?text=📱"
+      }
 
+      // 🔥 NEW: allow external URLs
+      if (path.startsWith("http")) {
+        return path
+      }
+
+      // fallback to Supabase storage
       return `https://kbpswsbsttmbikhuipzg.supabase.co/storage/v1/object/public/phones/${path}`
     }
 
